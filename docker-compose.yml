@@ -1,0 +1,68 @@
+services:
+  account-db:
+    image: postgres:17-alpine
+    container_name: account-db
+    environment:
+      POSTGRES_DB: account_db
+      POSTGRES_USER: account_user
+      POSTGRES_PASSWORD: account_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - account-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U account_user -d account_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  account-service:
+    image: mini-banking/account-service:dev
+    container_name: account-service
+    environment:
+      DB_HOST: account-db
+      DB_PORT: 5432
+      DB_NAME: account_db
+      DB_USER: account_user
+      DB_PASSWORD: account_pass
+    ports:
+      - "8081:8081"
+    depends_on:
+      account-db:
+        condition: service_healthy
+
+  transaction-db:
+    image: postgres:17-alpine
+    container_name: transaction-db
+    environment:
+      POSTGRES_DB: transaction_db
+      POSTGRES_USER: transaction_user
+      POSTGRES_PASSWORD: transaction_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - transaction-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transaction_user -d transaction_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  transaction-service:
+    image: mini-banking/transaction-service:dev
+    container_name: transaction-service
+    environment:
+      DB_HOST: transaction-db
+      DB_PORT: 5432
+      DB_NAME: transaction_db
+      DB_USER: transaction_user
+      DB_PASSWORD: transaction_pass
+    ports:
+      - "8082:8082"
+    depends_on:
+      transaction-db:
+        condition: service_healthy
+
+volumes:
+  account-db-data:
+  transaction-db-data:
