@@ -2,6 +2,7 @@ package com.minibanking.transaction.controller;
 
 import com.minibanking.transaction.client.AccountClient;
 import com.minibanking.transaction.entity.Transaction;
+import com.minibanking.transaction.messaging.TransactionEventProducer;
 import com.minibanking.transaction.repository.TransactionRepository;
 
 import org.springframework.http.ResponseEntity;
@@ -16,13 +17,16 @@ public class TransactionController {
 
     private final AccountClient accountClient;
     private final TransactionRepository transactionRepository;
+    private final TransactionEventProducer transactionEventProducer;
 
     public TransactionController(
             AccountClient accountClient,
-            TransactionRepository transactionRepository) {
+            TransactionRepository transactionRepository,
+            TransactionEventProducer transactionEventProducer) {
 
         this.accountClient = accountClient;
         this.transactionRepository = transactionRepository;
+        this.transactionEventProducer = transactionEventProducer;
     }
 
     @PostMapping
@@ -43,16 +47,20 @@ public class TransactionController {
                     ));
         }
 
-        Transaction transaction = new Transaction(
-                request.accountId(),
-                request.amount(),
-                "CREATED"
-        );
+        Transaction transaction =
+                new Transaction(
+                        request.accountId(),
+                        request.amount(),
+                        "CREATED"
+                );
 
-        Transaction saved =
+        Transaction savedTransaction =
                 transactionRepository.save(transaction);
 
-        return ResponseEntity.ok(saved);
+        transactionEventProducer
+                .publishTransactionCreated(savedTransaction);
+
+        return ResponseEntity.ok(savedTransaction);
     }
 
     @GetMapping("/{id}")

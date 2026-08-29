@@ -48,30 +48,78 @@ services:
       timeout: 5s
       retries: 5
 
+  kafka:
+    image: apache/kafka:4.0.0
+    container_name: kafka
+    hostname: kafka
+
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+    expose:
+      - "9092"
+
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
   transaction-service:
     image: mini-banking/transaction-service:dev
     container_name: transaction-service
+
     environment:
       DB_HOST: transaction-db
       DB_PORT: 5432
       DB_NAME: transaction_db
       DB_USER: transaction_user
       DB_PASSWORD: transaction_pass
+
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
     expose:
       - "8082"
+
     depends_on:
       transaction-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   gateway-service:
     image: mini-banking/gateway-service:dev
     container_name: gateway-service
+
     environment:
       JWT_SECRET: ${JWT_SECRET}
       AUTH_USERNAME: ${AUTH_USERNAME}
       AUTH_PASSWORD: ${AUTH_PASSWORD}
+
     ports:
       - "8080:8080"
+
     depends_on:
       account-service:
         condition: service_healthy
@@ -81,3 +129,4 @@ services:
 volumes:
   account-db-data:
   transaction-db-data:
+  kafka-data:
