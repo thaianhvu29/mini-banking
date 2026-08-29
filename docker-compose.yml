@@ -6,8 +6,8 @@ services:
       POSTGRES_DB: account_db
       POSTGRES_USER: account_user
       POSTGRES_PASSWORD: account_pass
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     volumes:
       - account-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,8 +25,8 @@ services:
       DB_NAME: account_db
       DB_USER: account_user
       DB_PASSWORD: account_pass
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
     depends_on:
       account-db:
         condition: service_healthy
@@ -38,8 +38,8 @@ services:
       POSTGRES_DB: transaction_db
       POSTGRES_USER: transaction_user
       POSTGRES_PASSWORD: transaction_pass
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     volumes:
       - transaction-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -57,10 +57,25 @@ services:
       DB_NAME: transaction_db
       DB_USER: transaction_user
       DB_PASSWORD: transaction_pass
-    ports:
-      - "8082:8082"
+    expose:
+      - "8082"
     depends_on:
       transaction-db:
+        condition: service_healthy
+
+  gateway-service:
+    image: mini-banking/gateway-service:dev
+    container_name: gateway-service
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_USERNAME: ${AUTH_USERNAME}
+      AUTH_PASSWORD: ${AUTH_PASSWORD}
+    ports:
+      - "8080:8080"
+    depends_on:
+      account-service:
+        condition: service_healthy
+      transaction-service:
         condition: service_healthy
 
 volumes:

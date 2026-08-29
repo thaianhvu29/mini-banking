@@ -8,15 +8,15 @@ RUN apt-get update \
     && groupadd --system spring \
     && useradd --system --gid spring spring
 
-COPY target/transaction-service-0.0.1-SNAPSHOT.jar app.jar
+COPY target/gateway-service-0.0.1-SNAPSHOT.jar app.jar
 
 RUN chown spring:spring app.jar
 
 USER spring
 
-EXPOSE 8082
+EXPOSE 8080
 
-HEALTHCHECK --interval=10s --timeout=5s --start-period=180s --retries=10 \
-  CMD curl -fsS http://localhost:8082/actuator/health/readiness || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=5 \
+  CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
