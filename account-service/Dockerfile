@@ -16,7 +16,7 @@ USER spring
 
 EXPOSE 8081
 
-HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=5 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=180s --retries=10 \
   CMD curl -fsS http://localhost:8081/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
