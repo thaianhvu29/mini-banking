@@ -3,6 +3,7 @@ services:
   account-db:
     image: postgres:17-alpine
     container_name: account-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: account_db
       POSTGRES_USER: account_user
@@ -20,6 +21,7 @@ services:
   account-service:
     image: mini-banking/account-service:dev
     container_name: account-service
+    restart: unless-stopped
     environment:
       DB_HOST: account-db
       DB_PORT: 5432
@@ -35,6 +37,7 @@ services:
   transaction-db:
     image: postgres:17-alpine
     container_name: transaction-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: transaction_db
       POSTGRES_USER: transaction_user
@@ -53,6 +56,7 @@ services:
     image: apache/kafka:4.0.0
     container_name: kafka
     hostname: kafka
+    restart: unless-stopped
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -79,6 +83,7 @@ services:
   transaction-service:
     image: mini-banking/transaction-service:dev
     container_name: transaction-service
+    restart: unless-stopped
     environment:
       DB_HOST: transaction-db
       DB_PORT: 5432
@@ -97,6 +102,7 @@ services:
   payment-db:
     image: postgres:17-alpine
     container_name: payment-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: payment_db
       POSTGRES_USER: payment_user
@@ -114,6 +120,7 @@ services:
   payment-service:
     image: mini-banking/payment-service:dev
     container_name: payment-service
+    restart: unless-stopped
     environment:
       DB_HOST: payment-db
       DB_PORT: 5432
@@ -131,6 +138,7 @@ services:
   audit-service:
     image: mini-banking/audit-service:dev
     container_name: audit-service
+    restart: unless-stopped
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
@@ -140,6 +148,7 @@ services:
   notification-service:
     image: mini-banking/notification-service:dev
     container_name: notification-service
+    restart: unless-stopped
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
@@ -149,12 +158,13 @@ services:
   gateway-service:
     image: mini-banking/gateway-service:dev
     container_name: gateway-service
+    restart: unless-stopped
     environment:
       JWT_SECRET: ${JWT_SECRET}
       AUTH_USERNAME: ${AUTH_USERNAME}
       AUTH_PASSWORD: ${AUTH_PASSWORD}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       account-service:
         condition: service_healthy
