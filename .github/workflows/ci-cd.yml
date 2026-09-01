@@ -21,9 +21,13 @@ permissions:
   contents: read
   packages: write
 
-jobs:
+env:
+  REGISTRY: ghcr.io
+  DEPLOY_DIR: /home/thaianhvu/mini-banking-deploy
 
+jobs:
   detect-changes:
+    name: Detect changed services
     runs-on: ubuntu-latest
 
     outputs:
@@ -43,70 +47,71 @@ jobs:
           set -euo pipefail
 
           ALL_SERVICES=(
-            account-service
-            transaction-service
-            payment-service
-            audit-service
-            notification-service
-            gateway-service
+            "account-service"
+            "transaction-service"
+            "payment-service"
+            "audit-service"
+            "notification-service"
+            "gateway-service"
           )
 
+          SELECTED_SERVICES=()
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.force_all }}" == "true" ]]; then
-            SERVICES=("${ALL_SERVICES[@]}")
+            echo "force_all enabled"
+            SELECTED_SERVICES=("${ALL_SERVICES[@]}")
           else
-
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              BASE="${{ github.event.pull_request.base.sha }}"
+              BASE_SHA="${{ github.event.pull_request.base.sha }}"
+              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            elif [[ "${{ github.event_name }}" == "push" ]]; then
+              BASE_SHA="${{ github.event.before }}"
+              HEAD_SHA="${{ github.sha }}"
             else
-              BASE="${{ github.event.before }}"
+              BASE_SHA="$(git rev-parse HEAD~1)"
+              HEAD_SHA="$(git rev-parse HEAD)"
             fi
 
-            HEAD="${{ github.sha }}"
+            echo "Base SHA: ${BASE_SHA}"
+            echo "Head SHA: ${HEAD_SHA}"
 
-            if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]]; then
-              BASE="$(git rev-list --max-parents=0 "${HEAD}")"
-            fi
-
-            echo "Comparing:"
-            echo "BASE=${BASE}"
-            echo "HEAD=${HEAD}"
-
-            CHANGED_FILES="$(git diff --name-only "${BASE}" "${HEAD}")"
+            CHANGED_FILES="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
 
             echo "Changed files:"
             echo "${CHANGED_FILES}"
 
-            SERVICES=()
-
-            for SERVICE in "${ALL_SERVICES[@]}"; do
-              if grep -q "^${SERVICE}/" <<< "${CHANGED_FILES}"; then
-                SERVICES+=("${SERVICE}")
-              fi
-            done
-
-            if grep -Eq '^(docker-compose\.yml|\.github/workflows/ci-cd\.yml)$' <<< "${CHANGED_FILES}"; then
-              SERVICES=("${ALL_SERVICES[@]}")
+            if echo "${CHANGED_FILES}" | grep -Eq '^(\.github/workflows/ci-cd\.yml|docker-compose\.yml|\.env\.example)$'; then
+              echo "Shared deployment configuration changed."
+              SELECTED_SERVICES=("${ALL_SERVICES[@]}")
+            else
+              for SERVICE in "${ALL_SERVICES[@]}"; do
+                if echo "${CHANGED_FILES}" | grep -q "^${SERVICE}/"; then
+                  SELECTED_SERVICES+=("${SERVICE}")
+                fi
+              done
             fi
           fi
 
-          if (( ${#SERVICES[@]} == 0 )); then
-            JSON='[]'
-            HAS_CHANGES=false
-          else
-            JSON="$(
-              printf '%s\n' "${SERVICES[@]}" \
-                | jq -R . \
-                | jq -s -c .
-            )"
-            HAS_CHANGES=true
+          if [[ ${#SELECTED_SERVICES[@]} -eq 0 ]]; then
+            echo 'services=[]' >> "$GITHUB_OUTPUT"
+            echo 'has_changes=false' >> "$GITHUB_OUTPUT"
+            echo "No deployable service changes detected."
+            exit 0
           fi
 
-          echo "Detected services: ${JSON}"
+          SERVICES_JSON="$(
+            printf '%s\n' "${SELECTED_SERVICES[@]}" |
+            jq -R . |
+            jq -s -c .
+          )"
 
-          echo "services=${JSON}" >> "${GITHUB_OUTPUT}"
-          echo "has_changes=${HAS_CHANGES}" >> "${GITHUB_OUTPUT}"
+          echo "Selected services: ${SERVICES_JSON}"
+
+          echo "services=${SERVICES_JSON}" >> "$GITHUB_OUTPUT"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
 
   build:
+    name: Test and build - ${{ matrix.service }}
     needs:
       - detect-changes
 
@@ -117,33 +122,44 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
+          cache-dependency-path: ${{ matrix.service }}/pom.xml
 
       - name: Maven test and package
         shell: bash
         run: |
-          mvn -B package -f "${{ matrix.service }}/pom.xml"
+          set -euo pipefail
+
+          mvn -B package \
+            -f "${{ matrix.service }}/pom.xml"
 
       - name: Build Docker image
         shell: bash
         run: |
+          set -euo pipefail
+
+          IMAGE="${REGISTRY}/${{ github.repository_owner }}/mini-banking-${{ matrix.service }}:${GITHUB_SHA}"
+
+          echo "Building image:"
+          echo "${IMAGE}"
+
           docker build \
-            -t "mini-banking/${{ matrix.service }}:ci-${GITHUB_SHA}" \
+            -t "${IMAGE}" \
             "${{ matrix.service }}"
 
       - name: Login to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -151,82 +167,72 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push immutable SHA image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/mini-banking-${{ matrix.service }}:${GITHUB_SHA}"
+          set -euo pipefail
 
-          docker tag \
-            "mini-banking/${{ matrix.service }}:ci-${GITHUB_SHA}" \
-            "${IMAGE}"
+          IMAGE="${REGISTRY}/${{ github.repository_owner }}/mini-banking-${{ matrix.service }}:${GITHUB_SHA}"
+
+          echo "Pushing:"
+          echo "${IMAGE}"
 
           docker push "${IMAGE}"
 
-          echo "Published ${IMAGE}"
-
   deploy:
+    name: Deploy - ${{ matrix.service }}
+
     needs:
       - detect-changes
       - build
 
     if: >
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
       needs.detect-changes.outputs.has_changes == 'true'
 
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
 
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
 
     steps:
-      - name: Configure SSH
+      - name: Update deployment repository
         shell: bash
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-
-          printf '%s\n' "${SERVER_SSH_KEY}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          ssh-keyscan -H "${SERVER_HOST}" >> ~/.ssh/known_hosts
-
-      - name: Login server to GHCR
-        shell: bash
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "${GHCR_TOKEN}" \
-            | ssh "${SERVER_USER}@${SERVER_HOST}" \
-              "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
-
-      - name: Deploy changed service
-        shell: bash
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SERVICE: ${{ matrix.service }}
-          IMAGE: ghcr.io/${{ github.repository_owner }}/mini-banking-${{ matrix.service }}:${{ github.sha }}
-        run: |
-          ssh "${SERVER_USER}@${SERVER_HOST}" \
-            bash -s -- "${SERVICE}" "${IMAGE}" <<'REMOTE'
           set -euo pipefail
 
-          SERVICE="$1"
-          IMAGE="$2"
-
-          cd ~/mini-banking
+          cd "${DEPLOY_DIR}"
 
           git fetch origin main
           git checkout main
-          git pull --ff-only origin main
+          git reset --hard origin/main
+
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            docker login ghcr.io \
+              -u "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Configure immutable image
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+
+          cd "${DEPLOY_DIR}"
+
+          IMAGE="${REGISTRY}/${{ github.repository_owner }}/mini-banking-${SERVICE}:${GITHUB_SHA}"
 
           case "${SERVICE}" in
             account-service)
@@ -256,68 +262,106 @@ jobs:
           touch .env
 
           if grep -q "^${IMAGE_VAR}=" .env; then
-            sed -i "s|^${IMAGE_VAR}=.*|${IMAGE_VAR}=${IMAGE}|" .env
+            sed -i \
+              "s|^${IMAGE_VAR}=.*|${IMAGE_VAR}=${IMAGE}|" \
+              .env
           else
             echo "${IMAGE_VAR}=${IMAGE}" >> .env
           fi
 
-          echo "Pulling ${IMAGE}"
-          docker pull "${IMAGE}"
+          echo "Configured deployment image:"
+          echo "${IMAGE_VAR}=${IMAGE}"
 
-          echo "Deploying ${SERVICE}"
-          docker compose up -d --no-deps "${SERVICE}"
+      - name: Pull and deploy service
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+
+          cd "${DEPLOY_DIR}"
+
+          docker compose pull "${SERVICE}"
+
+          docker compose up \
+            -d \
+            --no-deps \
+            "${SERVICE}"
+
+      - name: Validate deployment
+        shell: bash
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+
+          cd "${DEPLOY_DIR}"
+
+          CONTAINER_ID="$(docker compose ps -q "${SERVICE}")"
+
+          if [[ -z "${CONTAINER_ID}" ]]; then
+            echo "Container not found for ${SERVICE}"
+            exit 1
+          fi
 
           HAS_HEALTH="$(
             docker inspect \
               --format '{{if .State.Health}}yes{{else}}no{{end}}' \
-              "${SERVICE}"
+              "${CONTAINER_ID}"
           )"
 
           if [[ "${HAS_HEALTH}" == "yes" ]]; then
+            echo "Waiting for ${SERVICE} health check..."
 
             for ATTEMPT in $(seq 1 36); do
               STATUS="$(
                 docker inspect \
-                  --format '{{.State.Health.Status}}' \
-                  "${SERVICE}"
+                  --format '{{.State.Status}}' \
+                  "${CONTAINER_ID}"
               )"
 
-              echo "${SERVICE} health=${STATUS}"
+              HEALTH="$(
+                docker inspect \
+                  --format '{{.State.Health.Status}}' \
+                  "${CONTAINER_ID}"
+              )"
 
-              if [[ "${STATUS}" == "healthy" ]]; then
-                echo "${SERVICE} deployment successful"
+              echo "Attempt ${ATTEMPT}/36: status=${STATUS}, health=${HEALTH}"
+
+              if [[ "${HEALTH}" == "healthy" ]]; then
+                echo "${SERVICE} deployment validated."
                 exit 0
               fi
 
-              if [[ "${STATUS}" == "unhealthy" ]]; then
-                docker logs "${SERVICE}" --tail 100
+              if [[ "${HEALTH}" == "unhealthy" || "${STATUS}" == "exited" ]]; then
+                echo "${SERVICE} deployment failed."
+                docker logs --tail 100 "${CONTAINER_ID}" || true
                 exit 1
               fi
 
               sleep 10
             done
 
-            echo "${SERVICE} health validation timed out"
-            docker logs "${SERVICE}" --tail 100
+            echo "${SERVICE} did not become healthy in time."
+            docker logs --tail 100 "${CONTAINER_ID}" || true
             exit 1
-
-          else
-
-            sleep 20
-
-            STATUS="$(
-              docker inspect \
-                --format '{{.State.Status}}' \
-                "${SERVICE}"
-            )"
-
-            echo "${SERVICE} status=${STATUS}"
-
-            if [[ "${STATUS}" != "running" ]]; then
-              docker logs "${SERVICE}" --tail 100
-              exit 1
-            fi
-
-            echo "${SERVICE} deployment successful"
           fi
-          REMOTE
+
+          echo "${SERVICE} has no Docker healthcheck."
+          echo "Waiting 20 seconds before runtime validation..."
+
+          sleep 20
+
+          STATUS="$(
+            docker inspect \
+              --format '{{.State.Status}}' \
+              "${CONTAINER_ID}"
+          )"
+
+          if [[ "${STATUS}" != "running" ]]; then
+            echo "${SERVICE} is not running."
+            docker logs --tail 100 "${CONTAINER_ID}" || true
+            exit 1
+          fi
+
+          echo "${SERVICE} is running."
