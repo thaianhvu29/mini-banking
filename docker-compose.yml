@@ -19,7 +19,7 @@ services:
       retries: 5
 
   account-service:
-    image: mini-banking/account-service:dev
+    image: ${ACCOUNT_SERVICE_IMAGE:-mini-banking/account-service:dev}
     container_name: account-service
     restart: unless-stopped
     environment:
@@ -81,7 +81,7 @@ services:
       start_period: 120s
 
   transaction-service:
-    image: mini-banking/transaction-service:dev
+    image: ${TRANSACTION_SERVICE_IMAGE:-mini-banking/transaction-service:dev}
     container_name: transaction-service
     restart: unless-stopped
     environment:
@@ -118,7 +118,7 @@ services:
       retries: 5
 
   payment-service:
-    image: mini-banking/payment-service:dev
+    image: ${PAYMENT_SERVICE_IMAGE:-mini-banking/payment-service:dev}
     container_name: payment-service
     restart: unless-stopped
     environment:
@@ -136,7 +136,7 @@ services:
         condition: service_healthy
 
   audit-service:
-    image: mini-banking/audit-service:dev
+    image: ${AUDIT_SERVICE_IMAGE:-mini-banking/audit-service:dev}
     container_name: audit-service
     restart: unless-stopped
     environment:
@@ -146,7 +146,7 @@ services:
         condition: service_healthy
 
   notification-service:
-    image: mini-banking/notification-service:dev
+    image: ${NOTIFICATION_SERVICE_IMAGE:-mini-banking/notification-service:dev}
     container_name: notification-service
     restart: unless-stopped
     environment:
@@ -156,7 +156,7 @@ services:
         condition: service_healthy
 
   gateway-service:
-    image: mini-banking/gateway-service:dev
+    image: ${GATEWAY_SERVICE_IMAGE:-mini-banking/gateway-service:dev}
     container_name: gateway-service
     restart: unless-stopped
     environment:
