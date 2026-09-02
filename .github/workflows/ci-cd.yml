@@ -25,6 +25,10 @@ env:
   REGISTRY: ghcr.io
   DEPLOY_DIR: /home/thaianhvu/mini-banking-deploy
 
+  # Keep the same Docker Compose project identity even though
+  # deployment is executed from ~/mini-banking-deploy.
+  COMPOSE_PROJECT_NAME: mini-banking
+
 jobs:
   detect-changes:
     name: Detect changed services
@@ -112,6 +116,7 @@ jobs:
 
   build:
     name: Test and build - ${{ matrix.service }}
+
     needs:
       - detect-changes
 
@@ -209,7 +214,27 @@ jobs:
 
           cd "${DEPLOY_DIR}"
 
-          git fetch origin main
+          FETCH_SUCCESS=false
+
+          for ATTEMPT in 1 2 3; do
+            echo "Git fetch attempt ${ATTEMPT}/3"
+
+            if git fetch origin main; then
+              FETCH_SUCCESS=true
+              break
+            fi
+
+            if [[ "${ATTEMPT}" -lt 3 ]]; then
+              echo "GitHub connection failed. Retrying..."
+              sleep $((ATTEMPT * 5))
+            fi
+          done
+
+          if [[ "${FETCH_SUCCESS}" != "true" ]]; then
+            echo "Unable to fetch origin/main after 3 attempts."
+            exit 1
+          fi
+
           git checkout main
           git reset --hard origin/main
 
@@ -280,6 +305,9 @@ jobs:
           set -euo pipefail
 
           cd "${DEPLOY_DIR}"
+
+          echo "Compose project: ${COMPOSE_PROJECT_NAME}"
+          echo "Deploying service: ${SERVICE}"
 
           docker compose pull "${SERVICE}"
 
