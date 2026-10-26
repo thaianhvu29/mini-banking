@@ -28,6 +28,7 @@ services:
       DB_NAME: account_db
       DB_USER: account_user
       DB_PASSWORD: account_pass
+      MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
     expose:
       - "8081"
     depends_on:
